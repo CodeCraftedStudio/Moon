@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Lunar Vision - 3D Moon Visualizer (Production)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Poppins', 'Arial', sans-serif;
+        }
+        
+        .info-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(10, 10, 20, 0.75);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 12px 20px;
+            color: white;
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 10;
+            border-left: 3px solid #ffaa44;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            font-weight: 500;
+        }
+        
+        .controls-panel {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            border-radius: 32px;
+            padding: 8px 16px;
+            display: flex;
+            gap: 12px;
+            z-index: 20;
+            pointer-events: auto;
+            border: 1px solid rgba(255,255,200,0.2);
+        }
+        
+        button {
+            background: #2c2c3a;
+            border: none;
+            color: #e0e0ff;
+            padding: 8px 16px;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(4px);
+            letter-spacing: 0.5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,215,0,0.3);
+        }
+        
+        button:hover {
+            background: #4a4a6a;
+            color: #ffdd99;
+            transform: scale(1.02);
+            border-color: #ffaa66;
+        }
+        
+        .toggle-active {
+            background: #6a4e2a;
+            color: #ffdd99;
+            border-color: #ffaa44;
+            box-shadow: 0 0 8px rgba(255,170,0,0.3);
+        }
+        
+        .status-text {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #ccc;
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        @media (max-width: 600px) {
+            button { padding: 6px 12px; font-size: 10px; }
+            .info-panel { font-size: 10px; bottom: 12px; left: 12px; padding: 8px 12px; }
+            .controls-panel { gap: 6px; padding: 6px 12px; }
+        }
+        
+        .instruction {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 12px;
+            color: #aaa;
+            pointer-events: none;
+            white-space: nowrap;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-panel">
+        🌕 LUNAR REALISM | Craters • Displacement • Apollo Landmarks
+    </div>
+    <div class="controls-panel">
+        <button id="wireframeBtn">🔲 WIREFRAME</button>
+        <button id="autoRotateBtn">🔄 AUTO-ROTATE (IDLE)</button>
+    </div>
+    <div class="status-text" id="statusMsg">Loading moon textures...</div>
+    <div class="instruction">🖱️ Drag to rotate | Scroll to zoom | Touch friendly</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- Setup Scene, Cameras, Renderers ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x010118);
+        scene.fog = null;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.left = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.body.appendChild(labelRenderer.domElement);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.set(5, 2, 8);
+        camera.lookAt(0, 0, 0);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.rotateSpeed = 0.8;
+        controls.zoomSpeed = 1.2;
+        controls.panSpeed = 0.5;
+        controls.enableZoom = true;
+        controls.enablePan = true;
+        controls.autoRotate = false;
+        controls.autoRotateSpeed = 0.8;
+        controls.target.set(0, 0, 0);
+        
+        // --- Idle auto-rotate logic ---
+        let lastInteractionTime = Date.now();
+        const IDLE_TIMEOUT_MS = 3500;
+        let autoRotateIdleEnabled = true;
+        const autoRotateBtn = document.getElementById('autoRotateBtn');
+        
+        const resetIdleTimer = () => {
+            lastInteractionTime = Date.now();
+            if (controls.autoRotate) {
+                controls.autoRotate = false;
+                updateAutoRotateButtonStyle(false);
+            }
+        };
+        
+        renderer.domElement.addEventListener('mousedown', resetIdleTimer);
+        renderer.domElement.addEventListener('touchstart', resetIdleTimer);
+        renderer.domElement.addEventListener('wheel', resetIdleTimer);
+        controls.addEventListener('start', resetIdleTimer);
+        
+        const updateAutoRotateButtonStyle = (isActive) => {
+            if (isActive) {
+                autoRotateBtn.classList.add('toggle-active');
+                autoRotateBtn.textContent = '⏸️ AUTO IDLE ON';
+            } else {
+                autoRotateBtn.classList.remove('toggle-active');
+                autoRotateBtn.textContent = '🔄 AUTO-ROTATE (IDLE)';
+            }
+        };
+        
+        autoRotateBtn.addEventListener('click', () => {
+            autoRotateIdleEnabled = !autoRotateIdleEnabled;
+            if (!autoRotateIdleEnabled) {
+                controls.autoRotate = false;
+                updateAutoRotateButtonStyle(false);
+            } else {
+                updateAutoRotateButtonStyle(false);
+                resetIdleTimer();
+            }
+        });
+        
+        // --- Create Procedural Normal & Displacement Maps (ensures moon always shows with craters) ---
+        function createProceduralNormalMap(size = 1024) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#8080ff';
+            ctx.fillRect(0, 0, size, size);
+            // Draw random crater-like bumps
+            for (let i = 0; i < 800; i++) {
+                const radius = 8 + Math.random() * 35;
+                const x = Math.random() * size;
+                const y = Math.random() * size;
+                const intensity = 80 + Math.random() * 120;
+                const grd = ctx.createRadialGradient(x, y, radius * 0.2, x, y, radius);
+                grd.addColorStop(0, `rgb(${intensity}, ${intensity}, 255)`);
+                grd.addColorStop(1, `rgb(128, 128, 255)`);
+                ctx.globalCompositeOperation = 'overlay';
+                ctx.fillStyle = grd;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            // Add noise for roughness
+            const imageData = ctx.getImageData(0, 0, size, size);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const noise = (Math.random() - 0.5) * 30;
+                data[i] = Math.min(255, Math.max(0, data[i] + noise));
+                data[i+1] = Math.min(255, Math.max(0, data[i+1] + noise));
+                data[i+2] = Math.min(255, Math.max(0, data[i+2] + noise));
+            }
+            ctx.putImageData(imageData, 0, 0);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(3, 3); // increase tiling for finer detail
+            return texture;
+        }
+        
+        function createProceduralDisplacementMap(size = 1024) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(0, 0, size, size);
+            // Draw crater depressions
+            for (let i = 0; i < 1200; i++) {
+                const radius = 10 + Math.random() * 45;
+                const x = Math.random() * size;
+                const y = Math.random() * size;
+                const depth = 80 + Math.random() * 140;
+                const grd = ctx.createRadialGradient(x, y, radius * 0.2, x, y, radius);
+                grd.addColorStop(0, `rgb(${depth}, ${depth}, ${depth})`);
+                grd.addColorStop(1, `rgb(128, 128, 128)`);
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.fillStyle = grd;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            // Additional small bumps
+            for (let i = 0; i < 3000; i++) {
+                const radius = 3 + Math.random() * 12;
+                const x = Math.random() * size;
+                const y = Math.random() * size;
+                const bright = 100 + Math.random() * 100;
+                ctx.fillStyle = `rgb(${bright}, ${bright}, ${bright})`;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(2, 2);
+            return texture;
+        }
+        
+        // --- Load Reliable Color Map (Three.js official example texture) ---
+        const textureLoader = new THREE.TextureLoader();
+        const colorMap = textureLoader.load('https://threejs.org/examples/textures/planets/moon_1024.jpg');
+        
+        // Create procedural maps (ensures moon always shows with detail)
+        const normalMap = createProceduralNormalMap(1024);
+        const displacementMap = createProceduralDisplacementMap(1024);
+        
+        const statusDiv = document.getElementById('statusMsg');
+        colorMap.addEventListener('load', () => {
+            statusDiv.textContent = '🌕 Moon ready | Drag to explore';
+            setTimeout(() => { statusDiv.style.opacity = '0.8'; }, 1000);
+        });
+        colorMap.addEventListener('error', () => {
+            statusDiv.textContent = '⚠️ Using procedural textures (moon visible)';
+        });
+        
+        // --- Moon Geometry & Material ---
+        const moonGeometry = new THREE.SphereGeometry(2.0, 256, 256);
+        const moonMaterial = new THREE.MeshStandardMaterial({
+            map: colorMap,
+            normalMap: normalMap,
+            displacementMap: displacementMap,
+            displacementScale: 0.09,
+            roughness: 0.85,
+            metalness: 0.05,
+            emissive: 0x000000,
+            emissiveIntensity: 0,
+            side: THREE.DoubleSide
+        });
+        
+        const moon = new THREE.Mesh(moonGeometry, moonMaterial);
+        moon.castShadow = true;
+        moon.receiveShadow = true;
+        scene.add(moon);
+        
+        // --- Lighting ---
+        const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.65);
+        sunLight.position.set(8, 12, 5);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 20;
+        sunLight.shadow.camera.left = -5;
+        sunLight.shadow.camera.right = 5;
+        sunLight.shadow.camera.top = 5;
+        sunLight.shadow.camera.bottom = -5;
+        scene.add(sunLight);
+        
+        const ambientLight = new THREE.AmbientLight(0x222222, 0.32);
+        scene.add(ambientLight);
+        
+        const rimLight = new THREE.DirectionalLight(0xffcc88, 0.5);
+        rimLight.position.set(-4, 2, -6);
+        scene.add(rimLight);
+        
+        const fillLight = new THREE.PointLight(0x5577aa, 0.22);
+        fillLight.position.set(0, -3, 0);
+        scene.add(fillLight);
+        
+        // --- Starfield with depth (parallax) ---
+        const starCount = 3800;
+        const starGeometry1 = new THREE.BufferGeometry();
+        const starGeometry2 = new THREE.BufferGeometry();
+        const positions1 = new Float32Array(starCount * 3);
+        const positions2 = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const radius = 850 + Math.random() * 150;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            positions1[i*3] = radius * Math.sin(phi) * Math.cos(theta);
+            positions1[i*3+1] = radius * Math.sin(phi) * Math.sin(theta);
+            positions1[i*3+2] = radius * Math.cos(phi);
+            
+            const radius2 = 500 + Math.random() * 200;
+            const theta2 = Math.random() * Math.PI * 2;
+            const phi2 = Math.acos(2 * Math.random() - 1);
+            positions2[i*3] = radius2 * Math.sin(phi2) * Math.cos(theta2);
+            positions2[i*3+1] = radius2 * Math.sin(phi2) * Math.sin(theta2);
+            positions2[i*3+2] = radius2 * Math.cos(phi2);
+        }
+        starGeometry1.setAttribute('position', new THREE.BufferAttribute(positions1, 3));
+        starGeometry2.setAttribute('position', new THREE.BufferAttribute(positions2, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.28, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+        const starMaterial2 = new THREE.PointsMaterial({ color: 0xfff9dd, size: 0.22, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending });
+        const starsLayer1 = new THREE.Points(starGeometry1, starMaterial);
+        const starsLayer2 = new THREE.Points(starGeometry2, starMaterial2);
+        scene.add(starsLayer1);
+        scene.add(starsLayer2);
+        
+        const starFieldExtra = new THREE.Points(
+            new THREE.BufferGeometry(),
+            new THREE.PointsMaterial({ color: 0xaaccff, size: 0.15, transparent: true, blending: THREE.AdditiveBlending })
+        );
+        const extraPos = [];
+        for (let i = 0; i < 2000; i++) {
+            extraPos.push((Math.random() - 0.5) * 1800);
+            extraPos.push((Math.random() - 0.5) * 1000);
+            extraPos.push((Math.random() - 0.5) * 800 - 400);
+        }
+        starFieldExtra.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(extraPos), 3));
+        scene.add(starFieldExtra);
+        
+        // --- Subtle glow ---
+        const glowGeometry = new THREE.SphereGeometry(2.09, 32, 32);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffeedd,
+            transparent: true,
+            opacity: 0.03,
+            side: THREE.BackSide,
+            blending: THREE.AdditiveBlending
+        });
+        const moonGlow = new THREE.Mesh(glowGeometry, glowMaterial);
+        scene.add(moonGlow);
+        
+        // --- Apollo Landing Sites Markers ---
+        const landingSites = [
+            { name: "Apollo 11", lat: 0.674, lon: 23.473, color: 0xff5555, mission: "Tranquility Base" },
+            { name: "Apollo 12", lat: -3.012, lon: -23.421, color: 0xff7777, mission: "Oceanus Procellarum" },
+            { name: "Apollo 14", lat: -3.645, lon: -17.471, color: 0xff7777, mission: "Fra Mauro" },
+            { name: "Apollo 15", lat: 26.132, lon: 3.634, color: 0xff8888, mission: "Hadley Rille" },
+            { name: "Apollo 16", lat: -8.973, lon: 15.500, color: 0xff8888, mission: "Descartes Highlands" },
+            { name: "Apollo 17", lat: 20.190, lon: 30.768, color: 0xffaa88, mission: "Taurus-Littrow" },
+            { name: "Luna 9", lat: 7.08, lon: -64.38, color: 0x88aaff, mission: "USSR Landing" },
+            { name: "Chang'e 4", lat: -45.5, lon: 177.6, color: 0x88ccff, mission: "Far Side" }
+        ];
+        
+        const radiusMoon = 2.02;
+        function latLonToVector3(lat, lon, radius) {
+            const phi = (90 - lat) * Math.PI / 180;
+            const theta = lon * Math.PI / 180;
+            return new THREE.Vector3(
+                radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.cos(phi),
+                radius * Math.sin(phi) * Math.sin(theta)
+            );
+        }
+        
+        const markerItems = [];
+        landingSites.forEach(site => {
+            const pos = latLonToVector3(site.lat, site.lon, radiusMoon + 0.012);
+            const markerMat = new THREE.MeshStandardMaterial({
+                color: site.color,
+                emissive: site.color,
+                emissiveIntensity: 0.45,
+                roughness: 0.3
+            });
+            const markerSphere = new THREE.Mesh(new THREE.SphereGeometry(0.028, 16, 16), markerMat);
+            markerSphere.position.copy(pos);
+            scene.add(markerSphere);
+            
+            const div = document.createElement('div');
+            div.textContent = `${site.name}`;
+            div.style.color = '#ffddbb';
+            div.style.fontSize = '12px';
+            div.style.fontWeight = 'bold';
+            div.style.textShadow = '1px 1px 0px black';
+            div.style.background = 'rgba(0,0,0,0.6)';
+            div.style.padding = '2px 6px';
+            div.style.borderRadius = '20px';
+            div.style.borderLeft = `3px solid ${new THREE.Color(site.color).getStyle()}`;
+            div.style.fontFamily = 'monospace';
+            div.style.backdropFilter = 'blur(4px)';
+            div.style.whiteSpace = 'nowrap';
+            const label = new CSS2DObject(div);
+            const outward = pos.clone().normalize();
+            label.position.copy(pos.clone().add(outward.multiplyScalar(0.11)));
+            scene.add(label);
+            markerItems.push({ marker: markerSphere, label: label, originalPos: pos });
+        });
+        
+        // --- Wireframe Toggle ---
+        const wireframeBtn = document.getElementById('wireframeBtn');
+        let wireframeActive = false;
+        wireframeBtn.addEventListener('click', () => {
+            wireframeActive = !wireframeActive;
+            moonMaterial.wireframe = wireframeActive;
+            wireframeBtn.classList.toggle('toggle-active', wireframeActive);
+            wireframeBtn.textContent = wireframeActive ? '🔲 WIREFRAME ON' : '🔲 WIREFRAME';
+        });
+        
+        // --- Idle auto-rotate update ---
+        function updateAutoRotateFromIdle() {
+            if (!autoRotateIdleEnabled) return;
+            const idleTime = Date.now() - lastInteractionTime;
+            if (idleTime > IDLE_TIMEOUT_MS && !controls.autoRotate) {
+                controls.autoRotate = true;
+                controls.autoRotateSpeed = 0.55;
+                updateAutoRotateButtonStyle(true);
+            } else if (idleTime <= IDLE_TIMEOUT_MS && controls.autoRotate) {
+                controls.autoRotate = false;
+                updateAutoRotateButtonStyle(false);
+            }
+        }
+        
+        // --- Animation & Marker Rotation (markers rotate with moon) ---
+        let moonRotationSpeed = 0.0018;
+        
+        function animate() {
+            // Rotate moon on its axis
+            moon.rotation.y += moonRotationSpeed;
+            // Update marker positions to match moon's rotation
+            const rotMatrix = new THREE.Matrix4().makeRotationY(moon.rotation.y);
+            markerItems.forEach(item => {
+                const rotatedPos = item.originalPos.clone().applyMatrix4(rotMatrix);
+                item.marker.position.copy(rotatedPos);
+                const outward = rotatedPos.clone().normalize();
+                item.label.position.copy(rotatedPos.clone().add(outward.multiplyScalar(0.11)));
+            });
+            
+            // Star parallax
+            starsLayer1.rotation.y += 0.00015;
+            starsLayer2.rotation.x += 0.00007;
+            starsLayer2.rotation.z += 0.00005;
+            starFieldExtra.rotation.y -= 0.00003;
+            
+            // Dynamic rim light
+            rimLight.intensity = 0.5 + Math.sin(Date.now() * 0.0008) * 0.03;
+            fillLight.intensity = 0.22 + Math.sin(Date.now() * 0.0012) * 0.02;
+            
+            updateAutoRotateFromIdle();
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+        
+        animate();
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Final status
+        setTimeout(() => {
+            if (colorMap.image && colorMap.image.complete) {
+                statusDiv.textContent = '🌕 Moon fully loaded | Explore craters & landmarks';
+            } else {
+                statusDiv.textContent = '🌕 Moon active with procedural detail';
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
